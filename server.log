@@ -1,0 +1,25 @@
+nohup: ignoring input
+INFO:     Started server process [3464]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:52258 - "GET / HTTP/1.1" 200 OK
+INFO:     10.212.186.1:60026 - "GET /workflows HTTP/1.1" 200 OK
+INFO:     10.212.186.1:42126 - "HEAD / HTTP/1.1" 405 Method Not Allowed
+INFO:     10.212.186.1:42140 - "HEAD / HTTP/1.1" 405 Method Not Allowed
+INFO:     10.212.186.1:42142 - "HEAD /workflows HTTP/1.1" 405 Method Not Allowed
+INFO:     10.212.186.1:42150 - "GET / HTTP/1.1" 200 OK
+INFO:     10.212.186.1:42164 - "HEAD /tools HTTP/1.1" 405 Method Not Allowed
+INFO:     10.212.186.1:42168 - "GET / HTTP/1.1" 200 OK
+INFO:     10.212.186.1:42180 - "GET /workflows HTTP/1.1" 200 OK
+INFO:     10.212.186.1:42190 - "HEAD /tools/create_workflow HTTP/1.1" 405 Method Not Allowed
+INFO:     10.212.186.1:42200 - "GET /tools HTTP/1.1" 200 OK
+INFO:     10.212.186.1:42210 - "HEAD /workflows/example_hello_world/execute HTTP/1.1" 405 Method Not Allowed
+INFO:     10.212.186.1:42212 - "GET /tools/create_workflow HTTP/1.1" 405 Method Not Allowed
+INFO:     10.212.186.1:42220 - "GET /workflows/example_hello_world/execute HTTP/1.1" 405 Method Not Allowed
+INFO:     10.212.186.1:42230 - "GET /workflows HTTP/1.1" 200 OK
+INFO:     10.212.186.1:42234 - "GET / HTTP/1.1" 200 OK
+INFO:     10.212.186.1:42250 - "GET /tools HTTP/1.1" 200 OK
+INFO:     10.212.186.1:42262 - "GET /workflows/example_hello_world/execute HTTP/1.1" 405 Method Not Allowed
+INFO:     10.212.186.1:42278 - "GET / HTTP/1.1" 200 OK
+INFO:     10.212.186.1:42280 - "GET /tools/create_workflow HTTP/1.1" 405 Method Not Allowed
