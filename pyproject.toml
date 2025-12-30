@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "workflows-mcp"
-version = "0.1.0"
-description = "A Model Context Protocol server for creating and executing Python workflow scripts"
+name = "skills-mcp"
+version = "0.2.0"
+description = "A Model Context Protocol server for discovering, loading, and executing Agent Skills"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
     { name = "YoruLabs" }
 ]
-keywords = ["mcp", "workflows", "automation", "ai", "model-context-protocol"]
+keywords = ["mcp", "skills", "agent-skills", "automation", "ai", "model-context-protocol"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -25,6 +25,7 @@ classifiers = [
 dependencies = [
     "mcp>=1.0.0",
     "requests>=2.28.0",
+    "pyyaml>=6.0.0",
 ]
 
 [project.optional-dependencies]
@@ -36,12 +37,12 @@ dev = [
 ]
 
 [project.scripts]
-workflows-mcp = "src.server:main"
+skills-mcp = "src.server:main"
 
 [project.urls]
-Homepage = "https://github.com/YoruLabs/Workflows-MCP"
-Repository = "https://github.com/YoruLabs/Workflows-MCP"
-Issues = "https://github.com/YoruLabs/Workflows-MCP/issues"
+Homepage = "https://github.com/YoruLabs/Skills-MCP"
+Repository = "https://github.com/YoruLabs/Skills-MCP"
+Issues = "https://github.com/YoruLabs/Skills-MCP/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

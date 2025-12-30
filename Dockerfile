@@ -4,18 +4,19 @@ WORKDIR /app
 
 # Install dependencies
 COPY pyproject.toml .
-RUN pip install --no-cache-dir mcp requests fastapi uvicorn sse-starlette
+RUN pip install --no-cache-dir mcp requests pyyaml fastapi uvicorn sse-starlette
 
 # Copy source code
 COPY src/ ./src/
-COPY workflows/ ./workflows/
+COPY skills/ ./skills/
 
 # Set environment variables
-ENV WORKFLOWS_DIR=/app/workflows
+ENV SKILLS_DIR=/app/skills
 ENV PORT=8000
 
 # Expose port
 EXPOSE 8000
 
-# Run the HTTP server
+# Run the HTTP server (for Railway/remote deployment)
+# For local MCP usage, run: skills-mcp
 CMD ["python", "src/mcp_http_server.py"]

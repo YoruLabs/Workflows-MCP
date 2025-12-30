@@ -1,7 +1,8 @@
 """
-Workflow: example_slack_message
-Description: Example workflow that posts a message to Slack via webhook
-Created: 2024-12-30 00:00:00
+Slack Message Posting Script
+
+Posts messages to Slack channels via incoming webhooks.
+Part of the slack-message skill.
 """
 
 import os
@@ -9,7 +10,7 @@ import sys
 import json
 import requests
 from datetime import datetime
-from typing import Any, Dict, Optional
+
 
 def run(params: dict = None) -> dict:
     """
@@ -18,7 +19,7 @@ def run(params: dict = None) -> dict:
     Args:
         params: Dictionary with:
             - webhook_url (str): Slack webhook URL (or set SLACK_WEBHOOK_URL env var)
-            - message (str): The message to post
+            - message (str): The message to post (required)
             - channel (str): Optional channel override
             - username (str): Optional username override
     
@@ -36,7 +37,12 @@ def run(params: dict = None) -> dict:
             "message": "No webhook_url provided and SLACK_WEBHOOK_URL not set"
         }
     
-    message = params.get("message", "Hello from Workflows MCP!")
+    message = params.get("message")
+    if not message:
+        return {
+            "status": "error",
+            "message": "No message provided. The 'message' parameter is required."
+        }
     
     # Build the payload
     payload = {
@@ -75,6 +81,7 @@ def run(params: dict = None) -> dict:
             "message": f"Failed to post to Slack: {str(e)}"
         }
 
+
 if __name__ == "__main__":
     # Allow passing params as JSON via command line
     params = {}
@@ -82,7 +89,8 @@ if __name__ == "__main__":
         try:
             params = json.loads(sys.argv[1])
         except json.JSONDecodeError:
-            print("Warning: Could not parse params as JSON")
+            print(json.dumps({"status": "error", "message": "Could not parse params as JSON"}))
+            sys.exit(1)
     
     result = run(params)
     print(json.dumps(result, indent=2, default=str))

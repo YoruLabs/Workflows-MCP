@@ -1,8 +1,11 @@
 """
-Workflows MCP Server
+Skills MCP Server
 
-A Model Context Protocol server that enables AI agents to programmatically
-create, manage, and execute Python workflow scripts.
+A Model Context Protocol server that enables AI agents to discover, load,
+and execute Agent Skills - organized folders of instructions, scripts, 
+and resources that give agents additional capabilities.
+
+Based on the Agent Skills specification: https://agentskills.io/specification
 
 Author: YoruLabs
 License: MIT
@@ -13,142 +16,344 @@ import os
 import json
 import subprocess
 import sys
+import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
+import yaml
 from mcp.server.fastmcp import FastMCP
 
 # Initialize the MCP server
-mcp = FastMCP("workflows-mcp")
+mcp = FastMCP("skills-mcp")
 
 # Configuration
-WORKFLOWS_DIR = os.environ.get("WORKFLOWS_DIR", os.path.join(os.path.dirname(__file__), "..", "workflows"))
-Path(WORKFLOWS_DIR).mkdir(parents=True, exist_ok=True)
+SKILLS_DIR = os.environ.get("SKILLS_DIR", os.path.join(os.path.dirname(__file__), "..", "skills"))
+Path(SKILLS_DIR).mkdir(parents=True, exist_ok=True)
 
 
-def convert_string_booleans(obj: Any) -> Any:
+def parse_skill_frontmatter(content: str) -> tuple[dict, str]:
     """
-    Recursively convert string 'true'/'false' values to actual booleans.
-    
-    This is a workaround for MCP clients that serialize boolean values as strings.
-    See: https://github.com/modelcontextprotocol/modelcontextprotocol/issues/875
-    See: https://github.com/anthropics/claude-code/issues/3084
+    Parse YAML frontmatter from SKILL.md content.
     
     Args:
-        obj: The object to process (can be dict, list, or primitive)
+        content: Full content of SKILL.md file
     
     Returns:
-        The object with string booleans converted to actual booleans
+        Tuple of (frontmatter_dict, body_content)
     """
-    if isinstance(obj, dict):
-        return {key: convert_string_booleans(value) for key, value in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_string_booleans(item) for item in obj]
-    elif isinstance(obj, str):
-        if obj.lower() == 'true':
-            return True
-        elif obj.lower() == 'false':
-            return False
-        return obj
-    else:
-        return obj
+    frontmatter = {}
+    body = content
+    
+    # Check for YAML frontmatter (content between --- markers)
+    if content.startswith("---"):
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            try:
+                frontmatter = yaml.safe_load(parts[1]) or {}
+                body = parts[2].strip()
+            except yaml.YAMLError:
+                pass
+    
+    return frontmatter, body
 
 
-def get_workflow_path(name: str) -> Path:
-    """Get the full path for a workflow file."""
+def get_skill_path(name: str) -> Path:
+    """Get the full path for a skill directory."""
     # Sanitize the name to prevent directory traversal
     safe_name = "".join(c for c in name if c.isalnum() or c in "_-").lower()
-    return Path(WORKFLOWS_DIR) / f"{safe_name}.py"
+    return Path(SKILLS_DIR) / safe_name
 
 
-def generate_workflow_script(name: str, description: str, code: str) -> str:
-    """Generate a complete workflow script with metadata."""
-    template = f'''"""
-Workflow: {name}
-Description: {description}
-Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-"""
-
-import os
-import sys
-import json
-import requests
-from datetime import datetime
-from typing import Any, Dict, Optional
-
-{code}
-
-if __name__ == "__main__":
-    # Allow passing params as JSON via command line
-    params = {{}}
-    if len(sys.argv) > 1:
-        try:
-            params = json.loads(sys.argv[1])
-        except json.JSONDecodeError:
-            print("Warning: Could not parse params as JSON")
+def validate_skill_name(name: str) -> tuple[bool, str]:
+    """
+    Validate skill name according to Agent Skills spec.
     
-    result = run(params)
-    print(json.dumps(result, indent=2, default=str))
-'''
-    return template
+    Args:
+        name: The skill name to validate
+    
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if not name:
+        return False, "Name cannot be empty"
+    
+    if len(name) > 64:
+        return False, "Name must be 64 characters or less"
+    
+    if not re.match(r'^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$', name):
+        return False, "Name must be lowercase alphanumeric with hyphens, cannot start/end with hyphen"
+    
+    if '--' in name:
+        return False, "Name cannot contain consecutive hyphens"
+    
+    return True, ""
+
+
+def list_skill_resources(skill_path: Path) -> dict:
+    """
+    List all resources available in a skill directory.
+    
+    Args:
+        skill_path: Path to the skill directory
+    
+    Returns:
+        Dict with scripts, references, and assets lists
+    """
+    resources = {
+        "scripts": [],
+        "references": [],
+        "assets": []
+    }
+    
+    scripts_dir = skill_path / "scripts"
+    if scripts_dir.exists():
+        resources["scripts"] = [f.name for f in scripts_dir.iterdir() if f.is_file()]
+    
+    references_dir = skill_path / "references"
+    if references_dir.exists():
+        resources["references"] = [f.name for f in references_dir.iterdir() if f.is_file()]
+    
+    assets_dir = skill_path / "assets"
+    if assets_dir.exists():
+        resources["assets"] = [f.name for f in assets_dir.iterdir() if f.is_file()]
+    
+    return resources
 
 
 @mcp.tool()
-def create_workflow(name: str, description: str, code: str) -> dict:
+def list_skills() -> dict:
     """
-    Create a new Python workflow script.
+    List all available skills with their name and description.
     
-    Args:
-        name: The name of the workflow (will be used as filename, e.g., "meeting_review_to_slack")
-        description: A description of what the workflow does
-        code: The Python code for the workflow. Must include a `run(params: dict = None) -> dict` function.
+    START HERE: This is the first tool to call when using Skills MCP.
+    It returns the name and description of each skill, which is the first
+    level of progressive disclosure. Use this to discover what skills are
+    available before loading or executing them.
+    
+    After finding a relevant skill, use `get_skill` to load its full instructions.
     
     Returns:
-        dict: Status of the operation with the file path
+        dict: List of skills with name, description, and path
     
-    Example code structure:
-        def run(params: dict = None) -> dict:
-            params = params or {}
-            # Your workflow logic here
-            return {"status": "success", "result": "..."}
+    Example response:
+        {
+            "status": "success",
+            "count": 2,
+            "skills": [
+                {
+                    "name": "data-analysis",
+                    "description": "Analyze CSV and Excel files with pandas...",
+                    "path": "/skills/data-analysis"
+                },
+                ...
+            ]
+        }
     """
     try:
-        workflow_path = get_workflow_path(name)
+        skills = []
+        skills_path = Path(SKILLS_DIR)
         
-        # Check if workflow already exists
-        if workflow_path.exists():
-            return {
-                "status": "error",
-                "message": f"Workflow '{name}' already exists. Use update_workflow to modify it."
-            }
-        
-        # Generate the full script
-        script_content = generate_workflow_script(name, description, code)
-        
-        # Write the file
-        workflow_path.write_text(script_content)
+        for skill_dir in skills_path.iterdir():
+            if not skill_dir.is_dir():
+                continue
+            
+            skill_md = skill_dir / "SKILL.md"
+            if not skill_md.exists():
+                continue
+            
+            # Read and parse SKILL.md
+            content = skill_md.read_text()
+            frontmatter, _ = parse_skill_frontmatter(content)
+            
+            # Extract name and description (required fields)
+            name = frontmatter.get("name", skill_dir.name)
+            description = frontmatter.get("description", "No description provided")
+            
+            skills.append({
+                "name": name,
+                "description": description,
+                "path": str(skill_dir)
+            })
         
         return {
             "status": "success",
-            "message": f"Workflow '{name}' created successfully",
-            "path": str(workflow_path),
-            "name": name
+            "count": len(skills),
+            "skills": skills,
+            "hint": "Use get_skill(name) to load full instructions for a specific skill"
         }
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Failed to create workflow: {str(e)}"
+            "message": f"Failed to list skills: {str(e)}"
         }
 
 
-def _run_workflow_subprocess(workflow_path: str, params_json: str, cwd: str, timeout: int) -> dict:
+@mcp.tool()
+def get_skill(name: str, include_resources: bool = True) -> dict:
     """
-    Run the workflow subprocess synchronously.
+    Load a skill's full SKILL.md content and metadata.
+    
+    SECOND STEP: Call this after finding a skill via `list_skills`.
+    This loads the full instructions (second level of progressive disclosure).
+    The instructions tell you how to use the skill and what scripts are available.
+    
+    After loading the skill, use `execute_skill_script` to run any scripts
+    mentioned in the instructions.
+    
+    Args:
+        name: The skill name (e.g., "data-analysis")
+        include_resources: Whether to list available scripts/references/assets (default: True)
+    
+    Returns:
+        dict: Skill metadata, full instructions, and available resources
+    
+    Example response:
+        {
+            "status": "success",
+            "name": "data-analysis",
+            "description": "Analyze CSV files...",
+            "instructions": "# Data Analysis\\n\\n## How to use...",
+            "resources": {
+                "scripts": ["analyze.py", "visualize.py"],
+                "references": ["api_reference.md"],
+                "assets": ["template.json"]
+            }
+        }
+    """
+    try:
+        # Validate name
+        is_valid, error = validate_skill_name(name)
+        if not is_valid:
+            return {
+                "status": "error",
+                "message": f"Invalid skill name: {error}"
+            }
+        
+        skill_path = get_skill_path(name)
+        skill_md = skill_path / "SKILL.md"
+        
+        if not skill_path.exists() or not skill_md.exists():
+            return {
+                "status": "error",
+                "message": f"Skill '{name}' not found. Use list_skills() to see available skills."
+            }
+        
+        # Read and parse SKILL.md
+        content = skill_md.read_text()
+        frontmatter, body = parse_skill_frontmatter(content)
+        
+        result = {
+            "status": "success",
+            "name": frontmatter.get("name", name),
+            "description": frontmatter.get("description", "No description"),
+            "instructions": body,
+            "metadata": frontmatter.get("metadata", {}),
+        }
+        
+        # Add optional fields if present
+        if "license" in frontmatter:
+            result["license"] = frontmatter["license"]
+        
+        if "compatibility" in frontmatter:
+            result["compatibility"] = frontmatter["compatibility"]
+        
+        if "allowed-tools" in frontmatter:
+            result["allowed_tools"] = frontmatter["allowed-tools"]
+        
+        # List available resources
+        if include_resources:
+            result["resources"] = list_skill_resources(skill_path)
+            result["hint"] = "Use execute_skill_script(skill_name, script_name, params) to run a script"
+        
+        return result
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to load skill: {str(e)}"
+        }
+
+
+@mcp.tool()
+def get_skill_resource(skill_name: str, resource_path: str) -> dict:
+    """
+    Load a specific resource file from a skill (reference docs, assets, etc.).
+    
+    OPTIONAL: Use this to load additional documentation or assets referenced
+    in the skill's instructions. This is the third level of progressive disclosure.
+    
+    Args:
+        skill_name: The skill name (e.g., "data-analysis")
+        resource_path: Relative path to resource (e.g., "references/api.md" or "assets/template.json")
+    
+    Returns:
+        dict: Resource content and metadata
+    """
+    try:
+        # Validate skill name
+        is_valid, error = validate_skill_name(skill_name)
+        if not is_valid:
+            return {
+                "status": "error",
+                "message": f"Invalid skill name: {error}"
+            }
+        
+        skill_path = get_skill_path(skill_name)
+        
+        if not skill_path.exists():
+            return {
+                "status": "error",
+                "message": f"Skill '{skill_name}' not found"
+            }
+        
+        # Sanitize and validate resource path (prevent directory traversal)
+        resource_path = resource_path.lstrip("/")
+        if ".." in resource_path:
+            return {
+                "status": "error",
+                "message": "Invalid resource path"
+            }
+        
+        # Only allow access to specific directories
+        allowed_prefixes = ["references/", "assets/", "scripts/"]
+        if not any(resource_path.startswith(prefix) for prefix in allowed_prefixes):
+            return {
+                "status": "error",
+                "message": f"Resource must be in one of: {allowed_prefixes}"
+            }
+        
+        full_path = skill_path / resource_path
+        
+        if not full_path.exists():
+            return {
+                "status": "error",
+                "message": f"Resource '{resource_path}' not found in skill '{skill_name}'"
+            }
+        
+        # Read the resource
+        content = full_path.read_text()
+        
+        return {
+            "status": "success",
+            "skill_name": skill_name,
+            "resource_path": resource_path,
+            "content": content,
+            "size_bytes": len(content)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to load resource: {str(e)}"
+        }
+
+
+def _run_script_subprocess(script_path: str, params_json: str, cwd: str, timeout: int) -> dict:
+    """
+    Run the script subprocess synchronously.
     This function is designed to be called via asyncio.to_thread() to avoid blocking the event loop.
     
     Args:
-        workflow_path: Path to the workflow script
+        script_path: Path to the script file
         params_json: JSON string of parameters
         cwd: Working directory for the subprocess
         timeout: Timeout in seconds
@@ -157,7 +362,7 @@ def _run_workflow_subprocess(workflow_path: str, params_json: str, cwd: str, tim
         dict: Result containing stdout, stderr, and return_code
     """
     result = subprocess.run(
-        [sys.executable, workflow_path, params_json],
+        [sys.executable, script_path, params_json],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -171,45 +376,86 @@ def _run_workflow_subprocess(workflow_path: str, params_json: str, cwd: str, tim
 
 
 @mcp.tool()
-async def execute_workflow(name: str, params: dict = None) -> dict:
+async def execute_skill_script(
+    skill_name: str, 
+    script_name: str, 
+    params: dict = None
+) -> dict:
     """
-    Execute a workflow script by name.
+    Execute a pre-built script from a skill's scripts/ directory.
+    
+    THIRD STEP: Call this after loading a skill with `get_skill` to run
+    one of its scripts. The skill's instructions will tell you which
+    scripts are available and what parameters they accept.
+    
+    Scripts must have a `run(params: dict) -> dict` function as their entry point.
     
     Args:
-        name: The name of the workflow to execute
-        params: Optional dictionary of parameters to pass to the workflow's run() function
+        skill_name: The skill name (e.g., "data-analysis")
+        script_name: Name of script file in scripts/ directory (e.g., "analyze.py")
+        params: Optional dictionary of parameters to pass to the script's run() function
     
     Returns:
-        dict: The result of the workflow execution
+        dict: Execution result including output and any errors
+    
+    Example:
+        execute_skill_script("data-analysis", "analyze.py", {"file_path": "/data/sales.csv"})
     """
     try:
-        workflow_path = get_workflow_path(name)
-        
-        if not workflow_path.exists():
+        # Validate skill name
+        is_valid, error = validate_skill_name(skill_name)
+        if not is_valid:
             return {
                 "status": "error",
-                "message": f"Workflow '{name}' not found"
+                "message": f"Invalid skill name: {error}"
             }
         
-        # Convert string booleans to actual booleans (workaround for MCP client issues)
-        processed_params = convert_string_booleans(params or {})
+        skill_path = get_skill_path(skill_name)
         
-        # Prepare the command
-        params_json = json.dumps(processed_params)
+        if not skill_path.exists():
+            return {
+                "status": "error",
+                "message": f"Skill '{skill_name}' not found. Use list_skills() first."
+            }
         
-        # Execute the workflow in a separate thread to avoid blocking the event loop
+        # Validate script name (prevent directory traversal)
+        if "/" in script_name or "\\" in script_name or ".." in script_name:
+            return {
+                "status": "error",
+                "message": "Invalid script name"
+            }
+        
+        script_path = skill_path / "scripts" / script_name
+        
+        if not script_path.exists():
+            # List available scripts to help the user
+            scripts_dir = skill_path / "scripts"
+            available = []
+            if scripts_dir.exists():
+                available = [f.name for f in scripts_dir.iterdir() if f.is_file() and f.suffix == ".py"]
+            
+            return {
+                "status": "error",
+                "message": f"Script '{script_name}' not found in skill '{skill_name}'",
+                "available_scripts": available
+            }
+        
+        # Prepare parameters
+        params_json = json.dumps(params or {})
+        
+        # Execute the script in a separate thread to avoid blocking
         try:
             result = await asyncio.to_thread(
-                _run_workflow_subprocess,
-                str(workflow_path),
+                _run_script_subprocess,
+                str(script_path),
                 params_json,
-                WORKFLOWS_DIR,
+                str(skill_path),
                 300  # 5 minute timeout
             )
         except subprocess.TimeoutExpired:
             return {
                 "status": "error",
-                "message": f"Workflow '{name}' timed out after 5 minutes"
+                "message": f"Script '{script_name}' timed out after 5 minutes"
             }
         
         # Parse the output
@@ -219,7 +465,7 @@ async def execute_workflow(name: str, params: dict = None) -> dict:
         if result["return_code"] != 0:
             return {
                 "status": "error",
-                "message": f"Workflow execution failed",
+                "message": "Script execution failed",
                 "error": error,
                 "output": output,
                 "return_code": result["return_code"]
@@ -233,194 +479,16 @@ async def execute_workflow(name: str, params: dict = None) -> dict:
         
         return {
             "status": "success",
-            "message": f"Workflow '{name}' executed successfully",
+            "message": f"Script '{script_name}' executed successfully",
+            "skill_name": skill_name,
+            "script_name": script_name,
             "result": output_data,
             "stderr": error if error else None
         }
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Failed to execute workflow: {str(e)}"
-        }
-
-
-@mcp.tool()
-def list_workflows() -> dict:
-    """
-    List all available workflow scripts.
-    
-    Returns:
-        dict: List of workflows with their metadata
-    """
-    try:
-        workflows = []
-        workflows_path = Path(WORKFLOWS_DIR)
-        
-        for file in workflows_path.glob("*.py"):
-            # Read the file to extract metadata
-            content = file.read_text()
-            
-            # Extract description from docstring
-            description = ""
-            lines = content.split("\n")
-            for line in lines:
-                if line.startswith("Description:"):
-                    description = line.replace("Description:", "").strip()
-                    break
-            
-            workflows.append({
-                "name": file.stem,
-                "path": str(file),
-                "description": description,
-                "modified": datetime.fromtimestamp(file.stat().st_mtime).isoformat()
-            })
-        
-        return {
-            "status": "success",
-            "count": len(workflows),
-            "workflows": workflows
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to list workflows: {str(e)}"
-        }
-
-
-@mcp.tool()
-def read_workflow(name: str) -> dict:
-    """
-    Read the source code of a workflow script.
-    
-    Args:
-        name: The name of the workflow to read
-    
-    Returns:
-        dict: The workflow source code and metadata
-    """
-    try:
-        workflow_path = get_workflow_path(name)
-        
-        if not workflow_path.exists():
-            return {
-                "status": "error",
-                "message": f"Workflow '{name}' not found"
-            }
-        
-        content = workflow_path.read_text()
-        
-        return {
-            "status": "success",
-            "name": name,
-            "path": str(workflow_path),
-            "content": content
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to read workflow: {str(e)}"
-        }
-
-
-@mcp.tool()
-def update_workflow(name: str, description: str = None, code: str = None) -> dict:
-    """
-    Update an existing workflow script.
-    
-    Args:
-        name: The name of the workflow to update
-        description: New description (optional, keeps existing if not provided)
-        code: New Python code (optional, keeps existing if not provided)
-    
-    Returns:
-        dict: Status of the operation
-    """
-    try:
-        workflow_path = get_workflow_path(name)
-        
-        if not workflow_path.exists():
-            return {
-                "status": "error",
-                "message": f"Workflow '{name}' not found. Use create_workflow to create it."
-            }
-        
-        # Read existing content to preserve metadata if needed
-        existing_content = workflow_path.read_text()
-        
-        # Extract existing description if not provided
-        if description is None:
-            for line in existing_content.split("\n"):
-                if line.startswith("Description:"):
-                    description = line.replace("Description:", "").strip()
-                    break
-            description = description or "No description"
-        
-        # If no new code provided, extract existing code
-        if code is None:
-            # Find the code after the imports
-            lines = existing_content.split("\n")
-            code_start = 0
-            for i, line in enumerate(lines):
-                if line.startswith("def run(") or line.startswith("async def run("):
-                    code_start = i
-                    break
-            
-            # Extract from run function to before if __name__
-            code_lines = []
-            for i in range(code_start, len(lines)):
-                if lines[i].startswith('if __name__'):
-                    break
-                code_lines.append(lines[i])
-            code = "\n".join(code_lines)
-        
-        # Generate updated script
-        script_content = generate_workflow_script(name, description, code)
-        
-        # Write the file
-        workflow_path.write_text(script_content)
-        
-        return {
-            "status": "success",
-            "message": f"Workflow '{name}' updated successfully",
-            "path": str(workflow_path)
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to update workflow: {str(e)}"
-        }
-
-
-@mcp.tool()
-def delete_workflow(name: str) -> dict:
-    """
-    Delete a workflow script.
-    
-    Args:
-        name: The name of the workflow to delete
-    
-    Returns:
-        dict: Status of the operation
-    """
-    try:
-        workflow_path = get_workflow_path(name)
-        
-        if not workflow_path.exists():
-            return {
-                "status": "error",
-                "message": f"Workflow '{name}' not found"
-            }
-        
-        workflow_path.unlink()
-        
-        return {
-            "status": "success",
-            "message": f"Workflow '{name}' deleted successfully"
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to delete workflow: {str(e)}"
+            "message": f"Failed to execute script: {str(e)}"
         }
 
 
