@@ -213,8 +213,36 @@ def tool_create_workflow(arguments: dict) -> dict:
         return {"error": str(e)}
 
 
-def tool_execute_workflow(arguments: dict) -> dict:
-    """Execute a workflow."""
+def _run_workflow_subprocess_sync(workflow_path: str, params_json: str, cwd: str, timeout: int) -> dict:
+    """
+    Run the workflow subprocess synchronously.
+    This function is designed to be called via asyncio.to_thread() to avoid blocking the event loop.
+    
+    Args:
+        workflow_path: Path to the workflow script
+        params_json: JSON string of parameters
+        cwd: Working directory for the subprocess
+        timeout: Timeout in seconds
+    
+    Returns:
+        dict: Result containing stdout, stderr, and return_code
+    """
+    result = subprocess.run(
+        [sys.executable, workflow_path, params_json],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=cwd
+    )
+    return {
+        "stdout": result.stdout.strip(),
+        "stderr": result.stderr.strip(),
+        "return_code": result.returncode
+    }
+
+
+async def tool_execute_workflow_async(arguments: dict) -> dict:
+    """Execute a workflow asynchronously."""
     try:
         name = arguments.get("name")
         params = arguments.get("params", {})
@@ -229,18 +257,22 @@ def tool_execute_workflow(arguments: dict) -> dict:
         
         params_json = json.dumps(params)
         
-        result = subprocess.run(
-            [sys.executable, str(workflow_path), params_json],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            cwd=WORKFLOWS_DIR
-        )
+        # Execute the workflow in a separate thread to avoid blocking the event loop
+        try:
+            result = await asyncio.to_thread(
+                _run_workflow_subprocess_sync,
+                str(workflow_path),
+                params_json,
+                WORKFLOWS_DIR,
+                300  # 5 minute timeout
+            )
+        except subprocess.TimeoutExpired:
+            return {"error": "Workflow timed out after 5 minutes"}
         
-        output = result.stdout.strip()
-        error = result.stderr.strip()
+        output = result["stdout"]
+        error = result["stderr"]
         
-        if result.returncode != 0:
+        if result["return_code"] != 0:
             return {
                 "error": "Workflow execution failed",
                 "stderr": error,
@@ -257,8 +289,6 @@ def tool_execute_workflow(arguments: dict) -> dict:
             "message": f"Workflow '{name}' executed successfully",
             "result": output_data
         }
-    except subprocess.TimeoutExpired:
-        return {"error": "Workflow timed out after 5 minutes"}
     except Exception as e:
         return {"error": str(e)}
 
@@ -375,13 +405,18 @@ def tool_delete_workflow(arguments: dict) -> dict:
         return {"error": str(e)}
 
 
-TOOL_HANDLERS = {
+# Sync tool handlers (for non-blocking operations)
+TOOL_HANDLERS_SYNC = {
     "create_workflow": tool_create_workflow,
-    "execute_workflow": tool_execute_workflow,
     "list_workflows": tool_list_workflows,
     "read_workflow": tool_read_workflow,
     "update_workflow": tool_update_workflow,
     "delete_workflow": tool_delete_workflow,
+}
+
+# Async tool handlers (for potentially blocking operations)
+TOOL_HANDLERS_ASYNC = {
+    "execute_workflow": tool_execute_workflow_async,
 }
 
 
@@ -406,7 +441,7 @@ def create_jsonrpc_error(id: Any, code: int, message: str) -> dict:
     }
 
 
-def handle_jsonrpc_request(request: dict) -> dict:
+async def handle_jsonrpc_request(request: dict) -> dict:
     """Handle a JSON-RPC request."""
     method = request.get("method")
     params = request.get("params", {})
@@ -436,10 +471,13 @@ def handle_jsonrpc_request(request: dict) -> dict:
         tool_name = params.get("name")
         arguments = params.get("arguments", {})
         
-        if tool_name not in TOOL_HANDLERS:
+        # Check if it's an async tool
+        if tool_name in TOOL_HANDLERS_ASYNC:
+            result = await TOOL_HANDLERS_ASYNC[tool_name](arguments)
+        elif tool_name in TOOL_HANDLERS_SYNC:
+            result = TOOL_HANDLERS_SYNC[tool_name](arguments)
+        else:
             return create_jsonrpc_error(req_id, -32601, f"Tool '{tool_name}' not found")
-        
-        result = TOOL_HANDLERS[tool_name](arguments)
         
         return create_jsonrpc_response(req_id, {
             "content": [
@@ -519,7 +557,7 @@ async def messages_endpoint(request: Request, session_id: str = None):
             content=create_jsonrpc_error(None, -32700, "Parse error")
         )
     
-    response = handle_jsonrpc_request(body)
+    response = await handle_jsonrpc_request(body)
     
     if response is None:
         return JSONResponse(content={"status": "ok"})
@@ -542,7 +580,7 @@ async def mcp_endpoint(request: Request):
             content=create_jsonrpc_error(None, -32700, "Parse error")
         )
     
-    response = handle_jsonrpc_request(body)
+    response = await handle_jsonrpc_request(body)
     
     if response is None:
         return JSONResponse(content={"status": "ok"})
@@ -571,7 +609,7 @@ async def execute_workflow_rest(name: str, request: Request):
     except:
         body = {}
     
-    return tool_execute_workflow({"name": name, "params": body.get("params", {})})
+    return await tool_execute_workflow_async({"name": name, "params": body.get("params", {})})
 
 
 if __name__ == "__main__":

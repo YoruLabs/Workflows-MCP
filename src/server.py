@@ -8,6 +8,7 @@ Author: YoruLabs
 License: MIT
 """
 
+import asyncio
 import os
 import json
 import subprocess
@@ -113,8 +114,36 @@ def create_workflow(name: str, description: str, code: str) -> dict:
         }
 
 
+def _run_workflow_subprocess(workflow_path: str, params_json: str, cwd: str, timeout: int) -> dict:
+    """
+    Run the workflow subprocess synchronously.
+    This function is designed to be called via asyncio.to_thread() to avoid blocking the event loop.
+    
+    Args:
+        workflow_path: Path to the workflow script
+        params_json: JSON string of parameters
+        cwd: Working directory for the subprocess
+        timeout: Timeout in seconds
+    
+    Returns:
+        dict: Result containing stdout, stderr, and return_code
+    """
+    result = subprocess.run(
+        [sys.executable, workflow_path, params_json],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=cwd
+    )
+    return {
+        "stdout": result.stdout.strip(),
+        "stderr": result.stderr.strip(),
+        "return_code": result.returncode
+    }
+
+
 @mcp.tool()
-def execute_workflow(name: str, params: dict = None) -> dict:
+async def execute_workflow(name: str, params: dict = None) -> dict:
     """
     Execute a workflow script by name.
     
@@ -137,26 +166,32 @@ def execute_workflow(name: str, params: dict = None) -> dict:
         # Prepare the command
         params_json = json.dumps(params or {})
         
-        # Execute the workflow
-        result = subprocess.run(
-            [sys.executable, str(workflow_path), params_json],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 minute timeout
-            cwd=WORKFLOWS_DIR
-        )
+        # Execute the workflow in a separate thread to avoid blocking the event loop
+        try:
+            result = await asyncio.to_thread(
+                _run_workflow_subprocess,
+                str(workflow_path),
+                params_json,
+                WORKFLOWS_DIR,
+                300  # 5 minute timeout
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "status": "error",
+                "message": f"Workflow '{name}' timed out after 5 minutes"
+            }
         
         # Parse the output
-        output = result.stdout.strip()
-        error = result.stderr.strip()
+        output = result["stdout"]
+        error = result["stderr"]
         
-        if result.returncode != 0:
+        if result["return_code"] != 0:
             return {
                 "status": "error",
                 "message": f"Workflow execution failed",
                 "error": error,
                 "output": output,
-                "return_code": result.returncode
+                "return_code": result["return_code"]
             }
         
         # Try to parse output as JSON
@@ -170,11 +205,6 @@ def execute_workflow(name: str, params: dict = None) -> dict:
             "message": f"Workflow '{name}' executed successfully",
             "result": output_data,
             "stderr": error if error else None
-        }
-    except subprocess.TimeoutExpired:
-        return {
-            "status": "error",
-            "message": f"Workflow '{name}' timed out after 5 minutes"
         }
     except Exception as e:
         return {
