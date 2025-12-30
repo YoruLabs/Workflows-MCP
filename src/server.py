@@ -27,6 +27,34 @@ WORKFLOWS_DIR = os.environ.get("WORKFLOWS_DIR", os.path.join(os.path.dirname(__f
 Path(WORKFLOWS_DIR).mkdir(parents=True, exist_ok=True)
 
 
+def convert_string_booleans(obj: Any) -> Any:
+    """
+    Recursively convert string 'true'/'false' values to actual booleans.
+    
+    This is a workaround for MCP clients that serialize boolean values as strings.
+    See: https://github.com/modelcontextprotocol/modelcontextprotocol/issues/875
+    See: https://github.com/anthropics/claude-code/issues/3084
+    
+    Args:
+        obj: The object to process (can be dict, list, or primitive)
+    
+    Returns:
+        The object with string booleans converted to actual booleans
+    """
+    if isinstance(obj, dict):
+        return {key: convert_string_booleans(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_string_booleans(item) for item in obj]
+    elif isinstance(obj, str):
+        if obj.lower() == 'true':
+            return True
+        elif obj.lower() == 'false':
+            return False
+        return obj
+    else:
+        return obj
+
+
 def get_workflow_path(name: str) -> Path:
     """Get the full path for a workflow file."""
     # Sanitize the name to prevent directory traversal
@@ -163,8 +191,11 @@ async def execute_workflow(name: str, params: dict = None) -> dict:
                 "message": f"Workflow '{name}' not found"
             }
         
+        # Convert string booleans to actual booleans (workaround for MCP client issues)
+        processed_params = convert_string_booleans(params or {})
+        
         # Prepare the command
-        params_json = json.dumps(params or {})
+        params_json = json.dumps(processed_params)
         
         # Execute the workflow in a separate thread to avoid blocking the event loop
         try:
