@@ -221,40 +221,41 @@ def fetch_leads(
     if not APOLLO_API_KEY:
         raise ValueError("APOLLO_API_KEY not set. Add it to your .env file.")
     
-    leads_fetched = 0
-    page = 1
-    per_page = min(limit, 25)
-    
-    while leads_fetched < limit:
-        response = search_people(filters, page=page, per_page=per_page)
+    try:
+        leads_fetched = 0
+        page = 1
+        per_page = min(limit, 25)
         
-        people = response.get("people", [])
-        if not people:
-            logger.info("No more results from Apollo")
-            break
-        
-        for person in people:
-            if leads_fetched >= limit:
+        while leads_fetched < limit:
+            response = search_people(filters, page=page, per_page=per_page)
+            
+            people = response.get("people", [])
+            if not people:
+                logger.info("No more results from Apollo")
                 break
             
-            # Skip if no email
-            if not person.get("email"):
-                continue
+            for person in people:
+                if leads_fetched >= limit:
+                    break
+                
+                # Skip if no email
+                if not person.get("email"):
+                    continue
+                
+                # Normalize and store
+                lead_data = normalize_apollo_person(person)
+                upsert_lead(lead_data, run_id)
+                leads_fetched += 1
             
-            # Normalize and store
-            lead_data = normalize_apollo_person(person)
-            upsert_lead(lead_data, run_id)
-            leads_fetched += 1
-        
-        logger.info(f"Fetched {leads_fetched}/{limit} leads from Apollo")
-        
-        # Check if there are more pages
-        pagination = response.get("pagination", {})
-        if page >= pagination.get("total_pages", 1):
-            break
-        
-        page += 1
-        time.sleep(0.5)  # Rate limiting courtesy
+            logger.info(f"Fetched {leads_fetched}/{limit} leads from Apollo")
+            
+            # Check if there are more pages
+            pagination = response.get("pagination", {})
+            if page >= pagination.get("total_pages", 1):
+                break
+            
+            page += 1
+            time.sleep(0.5)  # Rate limiting courtesy
         
         # Update run stats
         update_run(run_id, leads_fetched=leads_fetched)
