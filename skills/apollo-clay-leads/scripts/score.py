@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Import db module
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
-from db import get_leads_by_run, save_score, update_run
+from db import get_leads_by_run, save_score, update_run, get_run
 
 
 def load_icp_config(icp_name: str) -> Dict[str, Any]:
@@ -276,15 +276,49 @@ def score_leads(run_id: str, icp_name: str = "icp_v1") -> Dict[str, Any]:
     
     Args:
         run_id: Pipeline run ID
-        icp_name: ICP config to use for scoring
+        icp_name: ICP config to use for scoring (use "query" for default weights)
     
     Returns:
         dict with status and scoring stats
     """
     try:
-        # Load ICP config
-        icp_config = load_icp_config(icp_name)
-        logger.info(f"Loaded ICP config: {icp_name}")
+        # Load ICP config or use the stored config for query-based scoring
+        if icp_name == "query":
+            # Try to get the ICP config from the run (contains parsed query filters)
+            run_data = get_run(run_id)
+            if run_data and run_data.get("icp_config"):
+                icp_config = run_data["icp_config"]
+                # Ensure scoring weights exist
+                if "scoring_weights" not in icp_config:
+                    icp_config["scoring_weights"] = {
+                        "title_match": 25,
+                        "seniority_match": 20,
+                        "industry_match": 20,
+                        "company_size_match": 15,
+                        "location_match": 10,
+                        "verified_email": 5,
+                        "has_linkedin": 5,
+                    }
+                logger.info(f"Using stored query filters: {list(icp_config.get('filters', {}).keys())}")
+            else:
+                # Fallback to empty filters
+                icp_config = {
+                    "name": "query",
+                    "filters": {},
+                    "scoring_weights": {
+                        "title_match": 25,
+                        "seniority_match": 20,
+                        "industry_match": 20,
+                        "company_size_match": 15,
+                        "location_match": 10,
+                        "verified_email": 5,
+                        "has_linkedin": 5,
+                    }
+                }
+                logger.info("Using default scoring weights (query mode)")
+        else:
+            icp_config = load_icp_config(icp_name)
+            logger.info(f"Loaded ICP config: {icp_name}")
         
         # Get leads
         leads = get_leads_by_run(run_id)
@@ -342,6 +376,7 @@ def score_leads(run_id: str, icp_name: str = "icp_v1") -> Dict[str, Any]:
     except Exception as e:
         logger.exception("Failed to score leads")
         return {"status": "error", "message": str(e)}
+
 
 
 def run(params: dict = None) -> dict:

@@ -1,9 +1,10 @@
 """
-Export Leads to CSV and JSON Artifacts
+Export Leads to CSV, JSON, and Linear-ready Markdown
 
 Generates output files:
-- output/leads_<YYYY-MM-DD>.csv
-- output/run_<run_id>.json
+- output/leads.csv
+- output/leads.json
+- output/linear_update.md (summary + top 10 leads + stats)
 """
 
 import sys
@@ -26,7 +27,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 from db import get_leads_by_run, get_scores_by_run, get_run, update_run
 
-# Output directory - relative to skill directory
+# Output directory - relative to repo root
 OUTPUT_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "..", "..", "..", "output")
 
 
@@ -37,17 +38,8 @@ def get_output_dir() -> str:
     return output_dir
 
 
-def export_csv(run_id: str, filename: Optional[str] = None) -> str:
-    """
-    Export leads with scores to CSV.
-    
-    Args:
-        run_id: Pipeline run ID
-        filename: Optional custom filename
-    
-    Returns:
-        Path to exported CSV file
-    """
+def get_merged_leads(run_id: str) -> List[Dict[str, Any]]:
+    """Get leads merged with their scores."""
     leads = get_leads_by_run(run_id)
     scores = get_scores_by_run(run_id)
     
@@ -61,129 +53,247 @@ def export_csv(run_id: str, filename: Optional[str] = None) -> str:
         merged.append({
             **lead,
             "fit_score": lead_score.get("fit_score", 0),
-            "score_reasons": "; ".join(lead_score.get("score_reasons", [])),
+            "score_reasons": lead_score.get("score_reasons", []),
+            "score_reasons_str": "; ".join(lead_score.get("score_reasons", [])),
         })
     
     # Sort by fit_score descending
     merged.sort(key=lambda x: x.get("fit_score", 0), reverse=True)
+    return merged
+
+
+def calculate_stats(leads: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Calculate stats from merged leads."""
+    score_values = [l["fit_score"] for l in leads if l.get("fit_score")]
+    
+    return {
+        "total_leads": len(leads),
+        "high_fit_leads": len([l for l in leads if l.get("fit_score", 0) >= 70]),
+        "medium_fit_leads": len([l for l in leads if 40 <= l.get("fit_score", 0) < 70]),
+        "low_fit_leads": len([l for l in leads if l.get("fit_score", 0) < 40]),
+        "avg_score": round(sum(score_values) / len(score_values), 1) if score_values else 0,
+        "max_score": max(score_values) if score_values else 0,
+        "min_score": min(score_values) if score_values else 0,
+    }
+
+
+def export_csv(run_id: str, filename: str = "leads.csv") -> str:
+    """
+    Export leads with scores to CSV.
+    
+    Args:
+        run_id: Pipeline run ID
+        filename: Output filename (default: leads.csv)
+    
+    Returns:
+        Path to exported CSV file
+    """
+    merged = get_merged_leads(run_id)
     
     # Define CSV columns
     columns = [
         "email", "full_name", "first_name", "last_name", "title", "seniority",
         "company_name", "company_domain", "company_size", "company_industry",
         "city", "state", "country", "linkedin_url", "phone",
-        "fit_score", "score_reasons", "email_verified", "source"
+        "fit_score", "score_reasons_str", "email_verified", "source"
     ]
     
-    # Generate filename
-    if not filename:
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        filename = f"leads_{date_str}.csv"
+    # Rename score_reasons_str to score_reasons for CSV header
+    column_names = [c if c != "score_reasons_str" else "score_reasons" for c in columns]
     
     filepath = os.path.join(get_output_dir(), filename)
     
     # Write CSV
     with open(filepath, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(merged)
+        writer = csv.writer(f)
+        writer.writerow(column_names)
+        for lead in merged:
+            row = [lead.get(c, "") for c in columns]
+            writer.writerow(row)
     
     logger.info(f"Exported {len(merged)} leads to {filepath}")
     return filepath
 
 
-def export_run_json(run_id: str) -> str:
+def export_json(run_id: str, filename: str = "leads.json") -> str:
     """
-    Export run metadata and stats to JSON.
+    Export leads with scores to JSON.
     
     Args:
         run_id: Pipeline run ID
+        filename: Output filename (default: leads.json)
     
     Returns:
         Path to exported JSON file
     """
     run_data = get_run(run_id)
-    if not run_data:
-        raise ValueError(f"Run not found: {run_id}")
-    
-    leads = get_leads_by_run(run_id)
-    scores = get_scores_by_run(run_id)
-    
-    # Calculate stats
-    score_values = [s["fit_score"] for s in scores if s.get("fit_score")]
-    
-    stats = {
-        "total_leads": len(leads),
-        "scored_leads": len(scores),
-        "high_fit_leads": len([s for s in scores if s.get("fit_score", 0) >= 70]),
-        "medium_fit_leads": len([s for s in scores if 40 <= s.get("fit_score", 0) < 70]),
-        "low_fit_leads": len([s for s in scores if s.get("fit_score", 0) < 40]),
-        "avg_score": round(sum(score_values) / len(score_values), 1) if score_values else 0,
-        "max_score": max(score_values) if score_values else 0,
-        "min_score": min(score_values) if score_values else 0,
-    }
-    
-    # Get top leads
-    top_leads = sorted(scores, key=lambda x: x.get("fit_score", 0), reverse=True)[:10]
+    merged = get_merged_leads(run_id)
+    stats = calculate_stats(merged)
     
     export_data = {
         "run_id": run_id,
-        "icp_name": run_data.get("icp_name"),
-        "source": run_data.get("source"),
-        "status": run_data.get("status"),
-        "started_at": run_data.get("started_at"),
-        "completed_at": run_data.get("completed_at"),
+        "icp_name": run_data.get("icp_name") if run_data else None,
+        "source": run_data.get("source") if run_data else None,
+        "exported_at": datetime.now().isoformat(),
         "stats": stats,
-        "top_leads": [
+        "leads": [
             {
                 "email": l.get("email"),
                 "full_name": l.get("full_name"),
                 "title": l.get("title"),
                 "company_name": l.get("company_name"),
+                "company_industry": l.get("company_industry"),
+                "company_size": l.get("company_size"),
+                "location": f"{l.get('city', '')}, {l.get('state', '')}, {l.get('country', '')}".strip(", "),
+                "linkedin_url": l.get("linkedin_url"),
                 "fit_score": l.get("fit_score"),
-                "score_reasons": l.get("score_reasons", [])[:3]  # Top 3 reasons
+                "score_breakdown": l.get("score_reasons", [])
             }
-            for l in top_leads
-        ],
-        "icp_config": run_data.get("icp_config", {}),
-        "exported_at": datetime.now().isoformat()
+            for l in merged
+        ]
     }
     
-    filename = f"run_{run_id}.json"
     filepath = os.path.join(get_output_dir(), filename)
     
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(export_data, f, indent=2, default=str)
     
-    logger.info(f"Exported run metadata to {filepath}")
+    logger.info(f"Exported {len(merged)} leads to {filepath}")
     return filepath
 
 
-def export_all(run_id: str) -> Dict[str, Any]:
+def export_linear_markdown(run_id: str, linear_issue: Optional[str] = None, filename: str = "linear_update.md") -> str:
     """
-    Export both CSV and JSON artifacts.
+    Export Linear-ready markdown summary.
     
     Args:
         run_id: Pipeline run ID
+        linear_issue: Optional Linear issue ID (e.g., LIV-56)
+        filename: Output filename (default: linear_update.md)
+    
+    Returns:
+        Path to exported markdown file
+    """
+    run_data = get_run(run_id)
+    merged = get_merged_leads(run_id)
+    stats = calculate_stats(merged)
+    
+    # Build markdown content
+    lines = []
+    
+    # Header with optional Linear issue
+    if linear_issue:
+        lines.append(f"# Lead Generation Update - {linear_issue}")
+    else:
+        lines.append("# Lead Generation Update")
+    
+    lines.append("")
+    lines.append(f"**Run ID:** `{run_id}`")
+    lines.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    if run_data:
+        lines.append(f"**ICP:** {run_data.get('icp_name', 'N/A')}")
+        lines.append(f"**Source:** {run_data.get('source', 'N/A')}")
+    lines.append("")
+    
+    # Stats section
+    lines.append("## 📊 Summary Stats")
+    lines.append("")
+    lines.append(f"| Metric | Value |")
+    lines.append(f"|--------|-------|")
+    lines.append(f"| Total Leads | **{stats['total_leads']}** |")
+    lines.append(f"| High Fit (70+) | **{stats['high_fit_leads']}** ✅ |")
+    lines.append(f"| Medium Fit (40-69) | **{stats['medium_fit_leads']}** |")
+    lines.append(f"| Low Fit (<40) | **{stats['low_fit_leads']}** |")
+    lines.append(f"| Average Score | **{stats['avg_score']}** |")
+    lines.append("")
+    
+    # Top 10 leads
+    lines.append("## 🎯 Top 10 Leads")
+    lines.append("")
+    
+    top_10 = merged[:10]
+    if top_10:
+        lines.append("| # | Name | Title | Company | Score |")
+        lines.append("|---|------|-------|---------|-------|")
+        for i, lead in enumerate(top_10, 1):
+            name = lead.get("full_name") or f"{lead.get('first_name', '')} {lead.get('last_name', '')}".strip()
+            title = lead.get("title", "N/A")[:30]
+            company = lead.get("company_name", "N/A")[:25]
+            score = lead.get("fit_score", 0)
+            score_emoji = "🟢" if score >= 70 else "🟡" if score >= 40 else "🔴"
+            lines.append(f"| {i} | {name} | {title} | {company} | {score_emoji} {score} |")
+        lines.append("")
+    
+    # Score breakdown for top lead
+    if top_10:
+        lines.append("### Top Lead Score Breakdown")
+        lines.append("")
+        top_lead = top_10[0]
+        name = top_lead.get("full_name") or f"{top_lead.get('first_name', '')} {top_lead.get('last_name', '')}".strip()
+        lines.append(f"**{name}** - {top_lead.get('title', '')} @ {top_lead.get('company_name', '')}")
+        lines.append("")
+        for reason in top_lead.get("score_reasons", [])[:5]:
+            lines.append(f"- {reason}")
+        lines.append("")
+    
+    # Next steps
+    lines.append("## 📋 Next Steps")
+    lines.append("")
+    lines.append(f"- [ ] Review top {min(len(top_10), 10)} high-fit leads")
+    lines.append("- [ ] Verify email deliverability")
+    lines.append("- [ ] Draft personalized outreach")
+    lines.append("- [ ] Schedule follow-up sequences")
+    lines.append("")
+    
+    # Files generated
+    lines.append("## 📁 Generated Files")
+    lines.append("")
+    lines.append("- `output/leads.csv` - Full lead list with scores")
+    lines.append("- `output/leads.json` - Structured lead data")
+    lines.append("- `output/linear_update.md` - This summary")
+    lines.append("")
+    
+    filepath = os.path.join(get_output_dir(), filename)
+    
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    
+    logger.info(f"Exported Linear summary to {filepath}")
+    return filepath
+
+
+def export_all(run_id: str, linear_issue: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Export all artifacts: CSV, JSON, and Linear markdown.
+    
+    Args:
+        run_id: Pipeline run ID
+        linear_issue: Optional Linear issue ID
     
     Returns:
         dict with paths to exported files
     """
     try:
         csv_path = export_csv(run_id)
-        json_path = export_run_json(run_id)
+        json_path = export_json(run_id)
+        md_path = export_linear_markdown(run_id, linear_issue)
         
-        # Count exported
-        leads = get_leads_by_run(run_id)
-        update_run(run_id, leads_exported=len(leads))
+        # Get stats
+        merged = get_merged_leads(run_id)
+        stats = calculate_stats(merged)
+        
+        # Update run
+        update_run(run_id, leads_exported=len(merged))
         
         return {
             "status": "success",
             "run_id": run_id,
             "csv_path": csv_path,
             "json_path": json_path,
-            "leads_exported": len(leads),
-            "message": f"Exported {len(leads)} leads to {csv_path}"
+            "markdown_path": md_path,
+            "leads_exported": len(merged),
+            "stats": stats,
+            "message": f"Exported {len(merged)} leads to output/"
         }
         
     except Exception as e:
@@ -200,23 +310,31 @@ def run(params: dict = None) -> dict:
         return {"status": "error", "message": "run_id parameter required"}
     
     export_type = params.get("type", "all")
+    linear_issue = params.get("linear_issue")
     
     if export_type == "csv":
         try:
-            csv_path = export_csv(run_id, params.get("filename"))
+            csv_path = export_csv(run_id, params.get("filename", "leads.csv"))
             return {"status": "success", "csv_path": csv_path}
         except Exception as e:
             return {"status": "error", "message": str(e)}
     
     elif export_type == "json":
         try:
-            json_path = export_run_json(run_id)
+            json_path = export_json(run_id, params.get("filename", "leads.json"))
             return {"status": "success", "json_path": json_path}
         except Exception as e:
             return {"status": "error", "message": str(e)}
     
+    elif export_type == "markdown":
+        try:
+            md_path = export_linear_markdown(run_id, linear_issue)
+            return {"status": "success", "markdown_path": md_path}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    
     else:  # all
-        return export_all(run_id)
+        return export_all(run_id, linear_issue)
 
 
 if __name__ == "__main__":
