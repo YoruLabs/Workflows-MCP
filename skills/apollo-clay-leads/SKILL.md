@@ -5,12 +5,55 @@ license: MIT
 compatibility: Requires APOLLO_API_KEY env var. Optional CLAY_API_KEY and CLAY_WEBHOOK_URL for enrichment.
 metadata:
   author: Livus
-  version: "1.0"
+  version: "2.0"
 ---
 
 # Apollo-Clay Lead Generation Pipeline
 
-End-to-end lead generation: fetch from Apollo → enrich via Clay → score → export.
+End-to-end lead generation: natural language query → fetch → enrich → score → export.
+
+## Quick Start
+
+**Primary method - natural language query:**
+```bash
+python3 skills/apollo-clay-leads/scripts/run_pipeline.py \
+  --query "administrators from large marketing companies in US" \
+  --limit 30
+```
+
+**Dry-run mode (no API calls, uses mock data):**
+```bash
+python3 skills/apollo-clay-leads/scripts/run_pipeline.py \
+  --query "CTOs at SaaS startups" \
+  --dry-run
+```
+
+**With Linear issue tracking:**
+```bash
+python3 skills/apollo-clay-leads/scripts/run_pipeline.py \
+  --query "VPs of Engineering" \
+  --limit 50 \
+  --linear-issue LIV-56
+```
+
+## CLI Reference
+
+```
+python3 run_pipeline.py [OPTIONS]
+
+Input Sources (choose one):
+  --query, -q TEXT    Natural language query (primary method)
+  --csv PATH          Path to Apollo CSV export (fallback)
+  --icp NAME          ICP config name (default: icp_v1)
+
+Options:
+  --limit, -n INT     Max leads to fetch (default: 100)
+  --dry-run           Use mock data, no external API calls
+  --linear-issue ID   Linear issue ID for markdown summary
+  --skip-enrichment   Skip Clay enrichment step
+  --skip-export       Skip export step
+  --json              Output result as JSON
+```
 
 ## Prerequisites
 
@@ -22,43 +65,56 @@ Set these environment variables in `.env`:
 | `CLAY_API_KEY` | No | Clay API key (for future use) |
 | `CLAY_WEBHOOK_URL` | No | Clay table webhook URL for enrichment |
 
-## Quick Start
+## Output Artifacts
 
-Run the full pipeline:
-```bash
-python skills/apollo-clay-leads/scripts/run_pipeline.py --icp icp_v1
-```
+After running, check the `output/` directory:
 
-Or use a CSV export from Apollo:
-```bash
-python skills/apollo-clay-leads/scripts/run_pipeline.py --icp icp_v1 --csv path/to/apollo_export.csv
-```
+| File | Description |
+|------|-------------|
+| `leads.csv` | Scored leads with all fields |
+| `leads.json` | Structured lead data with scores |
+| `linear_update.md` | Summary for Linear issue updates |
 
-## Available Scripts
+## Natural Language Query Examples
 
-| Script | Purpose |
-|--------|---------|
-| `run_pipeline.py` | Main orchestrator - runs the full pipeline |
-| `fetch_apollo_api.py` | Fetch leads from Apollo.io API |
-| `ingest_apollo_csv.py` | Parse Apollo CSV exports |
-| `enrich_clay.py` | Enrich leads via Clay webhook |
-| `score.py` | Score leads with explainable reasoning |
-| `export.py` | Export to CSV and JSON artifacts |
-| `db.py` | SQLite storage layer |
+The pipeline parses natural language queries into Apollo API filters:
+
+| Query | Parsed Filters |
+|-------|----------------|
+| "administrators from large marketing companies" | titles: Administrator*, size: 500+, industry: Marketing |
+| "CTOs at SaaS startups" | titles: CTO, industry: SaaS, size: 1-50 |
+| "VPs of Engineering in US" | titles: VP*, location: US |
+| "directors at enterprise software companies" | titles: Director, size: 500+, industry: Software |
 
 ## Pipeline Flow
 
 ```
-1. Load ICP config (icp_configs/<name>.json)
+1. Parse query → Extract filters (titles, size, industry, location)
 2. Ingest leads:
    - From Apollo API (default)
    - From CSV export (--csv flag)
+   - From mock data (--dry-run)
 3. Enrich via Clay webhook (if CLAY_WEBHOOK_URL set)
 4. Score all leads (fit_score 0-100 + reasons)
 5. Export artifacts:
-   - output/leads_<YYYY-MM-DD>.csv
-   - output/run_<run_id>.json
+   - output/leads.csv
+   - output/leads.json
+   - output/linear_update.md
 ```
+
+## Scoring
+
+Each lead gets a `fit_score` (0-100) with transparent `score_breakdown`:
+
+| Criterion | Points |
+|-----------|--------|
+| Title match | +25 |
+| Seniority match | +20 |
+| Industry match | +20 |
+| Company size match | +15 |
+| Location match | +10 |
+| Verified email | +5 |
+| Has LinkedIn | +5 |
 
 ## ICP Configuration
 
@@ -86,28 +142,19 @@ Create custom ICPs in `scripts/icp_configs/<name>.json`:
 }
 ```
 
-## Output Artifacts
-
-- **leads_<date>.csv**: Scored leads with columns: name, email, title, company, fit_score, score_reasons, etc.
-- **run_<id>.json**: Run metadata including stats, ICP used, timestamp, counts
-
-## Example Usage
+## MCP Usage
 
 ```python
-# Via MCP
+# Natural language query
+execute_skill_script("apollo-clay-leads", "run_pipeline.py", {
+    "query": "administrators from large marketing companies",
+    "limit": 30,
+    "dry_run": true
+})
+
+# Using ICP config
 execute_skill_script("apollo-clay-leads", "run_pipeline.py", {
     "icp": "icp_v1",
     "limit": 100
-})
-
-# Fetch only (no enrichment)
-execute_skill_script("apollo-clay-leads", "fetch_apollo_api.py", {
-    "icp": "icp_v1",
-    "limit": 50
-})
-
-# Score existing leads
-execute_skill_script("apollo-clay-leads", "score.py", {
-    "run_id": "abc123"
 })
 ```
