@@ -60,95 +60,19 @@ def load_icp_config(icp_name: str) -> Dict[str, Any]:
 
 def parse_query_to_filters(query: str) -> Dict[str, Any]:
     """
-    Parse a natural language query into Apollo API filters.
+    Parse a natural language query into Apollo API filters using LLM.
     
-    Examples:
-        "administrators from large marketing companies in US"
-        -> {person_titles: [*administrator*], organization_locations: [US], ...}
+    Uses OpenAI to intelligently understand the query and extract
+    relevant Apollo API filter parameters.
+    
+    Args:
+        query: Natural language search query
+    
+    Returns:
+        dict with Apollo API filter fields
     """
-    query_lower = query.lower()
-    filters = {}
-    
-    # Extract titles/roles
-    title_keywords = []
-    role_patterns = [
-        (r'\badministrator[s]?\b', ['Administrator', 'System Administrator', 'IT Administrator', 'Network Administrator', 'Database Administrator']),
-        (r'\bcto[s]?\b', ['CTO', 'Chief Technology Officer']),
-        (r'\bvp[s]?\b', ['VP', 'Vice President']),
-        (r'\bdirector[s]?\b', ['Director']),
-        (r'\bmanager[s]?\b', ['Manager']),
-        (r'\bengineer[s]?\b', ['Engineer', 'Software Engineer']),
-        (r'\bhead of\b', ['Head of']),
-        (r'\bfounder[s]?\b', ['Founder', 'Co-Founder']),
-        (r'\bceo[s]?\b', ['CEO', 'Chief Executive Officer']),
-    ]
-    
-    for pattern, titles in role_patterns:
-        if re.search(pattern, query_lower):
-            title_keywords.extend(titles)
-    
-    if title_keywords:
-        filters["person_titles"] = title_keywords
-    
-    # Extract company size
-    if 'large' in query_lower or 'enterprise' in query_lower:
-        filters["organization_num_employees_ranges"] = ["501,1000", "1001,5000", "5001,10000"]
-    elif 'mid' in query_lower or 'medium' in query_lower:
-        filters["organization_num_employees_ranges"] = ["51,200", "201,500"]
-    elif 'small' in query_lower or 'startup' in query_lower:
-        filters["organization_num_employees_ranges"] = ["1,10", "11,50"]
-    
-    # Extract industry keywords
-    industry_keywords = []
-    industry_patterns = [
-        (r'\bmarketing\b', ['Marketing', 'Digital Marketing', 'Marketing Services']),
-        (r'\bsaas\b', ['SaaS', 'Software as a Service']),
-        (r'\bsoftware\b', ['Software', 'Computer Software']),
-        (r'\btech\b', ['Technology', 'Information Technology']),
-        (r'\bfintech\b', ['Financial Technology', 'FinTech']),
-        (r'\bhealthcare\b', ['Healthcare', 'Health Care']),
-        (r'\be-commerce\b|\becommerce\b', ['E-commerce', 'Retail']),
-        (r'\badvertising\b', ['Advertising', 'Ad Tech']),
-        (r'\bfashion\b', ['Fashion', 'Apparel', 'Clothing', 'Retail']),
-        (r'\bretail\b', ['Retail', 'Consumer Goods']),
-        (r'\bfinance\b|\bbanking\b', ['Financial Services', 'Banking']),
-        (r'\beducation\b', ['Education', 'E-Learning']),
-        (r'\breal estate\b|\brealestate\b', ['Real Estate']),
-        (r'\blogistics\b', ['Logistics', 'Transportation']),
-        (r'\bfood\b|\bbeverage\b', ['Food & Beverage', 'Food Production']),
-    ]
-    
-    for pattern, keywords in industry_patterns:
-        if re.search(pattern, query_lower):
-            industry_keywords.extend(keywords)
-    
-    if industry_keywords:
-        filters["q_organization_keyword_tags"] = industry_keywords
-    
-    # Extract location
-    location_patterns = [
-        (r'\bu\.?s\.?a?\.?\b|\bunited states\b|\bamerica\b', ['United States']),
-        (r'\bu\.?k\.?\b|\bunited kingdom\b|\bbritain\b|\bengland\b', ['United Kingdom']),
-        (r'\bcanada\b', ['Canada']),
-        (r'\bgermany\b', ['Germany']),
-        (r'\bfrance\b', ['France']),
-        (r'\baustralia\b', ['Australia']),
-        (r'\bbrazil\b|\bbrasil\b', ['Brazil']),
-        (r'\bmexico\b|\bméxico\b', ['Mexico']),
-        (r'\bargentina\b', ['Argentina']),
-        (r'\bspain\b|\bespanha\b', ['Spain']),
-        (r'\bportugal\b', ['Portugal']),
-        (r'\bitaly\b|\bitália\b', ['Italy']),
-        (r'\bjapan\b', ['Japan']),
-        (r'\bindia\b', ['India']),
-    ]
-    
-    for pattern, locations in location_patterns:
-        if re.search(pattern, query_lower):
-            filters["organization_locations"] = locations
-            break
-    
-    return filters
+    from parse_query import parse_query_with_llm
+    return parse_query_with_llm(query)
 
 
 def make_request(url: str, data: Dict[str, Any], retries: int = 3) -> Dict[str, Any]:
