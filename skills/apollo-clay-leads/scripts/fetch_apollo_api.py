@@ -109,6 +109,13 @@ def parse_query_to_filters(query: str) -> Dict[str, Any]:
         (r'\bhealthcare\b', ['Healthcare', 'Health Care']),
         (r'\be-commerce\b|\becommerce\b', ['E-commerce', 'Retail']),
         (r'\badvertising\b', ['Advertising', 'Ad Tech']),
+        (r'\bfashion\b', ['Fashion', 'Apparel', 'Clothing', 'Retail']),
+        (r'\bretail\b', ['Retail', 'Consumer Goods']),
+        (r'\bfinance\b|\bbanking\b', ['Financial Services', 'Banking']),
+        (r'\beducation\b', ['Education', 'E-Learning']),
+        (r'\breal estate\b|\brealestate\b', ['Real Estate']),
+        (r'\blogistics\b', ['Logistics', 'Transportation']),
+        (r'\bfood\b|\bbeverage\b', ['Food & Beverage', 'Food Production']),
     ]
     
     for pattern, keywords in industry_patterns:
@@ -126,6 +133,14 @@ def parse_query_to_filters(query: str) -> Dict[str, Any]:
         (r'\bgermany\b', ['Germany']),
         (r'\bfrance\b', ['France']),
         (r'\baustralia\b', ['Australia']),
+        (r'\bbrazil\b|\bbrasil\b', ['Brazil']),
+        (r'\bmexico\b|\bméxico\b', ['Mexico']),
+        (r'\bargentina\b', ['Argentina']),
+        (r'\bspain\b|\bespanha\b', ['Spain']),
+        (r'\bportugal\b', ['Portugal']),
+        (r'\bitaly\b|\bitália\b', ['Italy']),
+        (r'\bjapan\b', ['Japan']),
+        (r'\bindia\b', ['India']),
     ]
     
     for pattern, locations in location_patterns:
