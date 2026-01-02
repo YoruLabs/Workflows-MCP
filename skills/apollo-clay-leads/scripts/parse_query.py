@@ -83,8 +83,7 @@ def parse_query_with_llm(query: str) -> Dict[str, Any]:
         dict with Apollo API filter fields
     """
     if not OPENAI_API_KEY:
-        logger.warning("OPENAI_API_KEY not set, falling back to basic parsing")
-        return _fallback_parse(query)
+        raise ValueError("OPENAI_API_KEY not set. Add it to your .env file.")
     
     try:
         from urllib.request import Request, urlopen
@@ -129,39 +128,8 @@ def parse_query_with_llm(query: str) -> Dict[str, Any]:
         return _fallback_parse(query)
     except Exception as e:
         logger.error(f"Unexpected error in LLM parsing: {e}")
-        return _fallback_parse(query)
+        raise
 
-
-def _fallback_parse(query: str) -> Dict[str, Any]:
-    """
-    Basic fallback parsing when LLM is unavailable.
-    Returns minimal filters based on simple keyword matching.
-    """
-    import re
-    query_lower = query.lower()
-    filters = {}
-    
-    # Very basic title extraction
-    if "administrator" in query_lower:
-        filters["person_titles"] = ["Administrator", "System Administrator", "IT Administrator"]
-    elif "cto" in query_lower or "chief technology" in query_lower:
-        filters["person_titles"] = ["CTO", "Chief Technology Officer"]
-    elif "vp" in query_lower or "vice president" in query_lower:
-        filters["person_titles"] = ["VP", "Vice President"]
-    elif "director" in query_lower:
-        filters["person_titles"] = ["Director"]
-    elif "manager" in query_lower:
-        filters["person_titles"] = ["Manager"]
-    
-    # Basic size detection
-    if "large" in query_lower or "enterprise" in query_lower:
-        filters["organization_num_employees_ranges"] = ["501,1000", "1001,5000", "5001,10000"]
-    elif "startup" in query_lower or "small" in query_lower:
-        filters["organization_num_employees_ranges"] = ["1,10", "11,50"]
-    elif "mid" in query_lower or "medium" in query_lower:
-        filters["organization_num_employees_ranges"] = ["51,200", "201,500"]
-    
-    return filters
 
 
 def run(params: dict = None) -> dict:
