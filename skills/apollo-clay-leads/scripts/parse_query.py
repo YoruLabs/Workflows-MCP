@@ -10,6 +10,30 @@ import json
 import logging
 from typing import Dict, Any, Optional
 
+# Auto-load .env file
+def _load_env():
+    """Load environment variables from .env file."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Look for .env in skill dir, or project root
+    for path in [
+        os.path.join(script_dir, "..", "..", "..", ".env"),  # Project root
+        os.path.join(script_dir, "..", ".env"),  # Skill dir
+    ]:
+        env_path = os.path.abspath(path)
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, _, value = line.partition("=")
+                        # Remove quotes if present
+                        value = value.strip().strip('"').strip("'")
+                        if key and value and key not in os.environ:
+                            os.environ[key] = value
+            break
+
+_load_env()
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
