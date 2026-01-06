@@ -18,37 +18,40 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-CLARIFICATION_PROMPT = """You are a B2B lead research assistant. Analyze the user's search query and determine if it needs clarification to produce quality leads.
+CLARIFICATION_PROMPT = """You are an expert B2B lead research assistant. Your job is to analyze the user's search query and ask smart clarifying questions to help produce the best possible leads.
 
-A query needs clarification if it's missing important specifics like:
-- Geographic location/region
-- Industry or sector
-- Company size (startup, SMB, enterprise)
-- Seniority level (if not obvious from title)
+Think critically about what information would make the search more precise and valuable. Consider aspects like:
+- Target geography or market
+- Industry/sector focus
+- Company characteristics (size, stage, type)
+- Role specifics (seniority, department)
+- Any other context that would help find better matches
+
+Be creative and adapt your questions to the specific query. Don't ask generic questions - tailor them to what the user is actually looking for.
 
 Respond with a JSON object:
 {{
   "needs_clarification": boolean,
-  "reason": "Brief explanation of why clarification is needed (or not)",
+  "reason": "Brief explanation of your assessment",
   "questions": [
     {{
-      "id": "location",
-      "question": "What geographic region are you targeting?",
-      "options": ["United States", "Europe", "Brazil", "Global", "Other"]
+      "id": "unique_id",
+      "question": "Your question here",
+      "options": ["Option 1", "Option 2", "Option 3", "Other"]
     }}
   ],
   "parsed_so_far": {{
-    "titles": ["extracted titles if any"],
-    "location": "extracted location if mentioned",
-    "industry": "extracted industry if mentioned"
+    "understood": "What you understood from the query",
+    "missing": "What key information is missing"
   }}
 }}
 
 Rules:
-- Maximum 3 questions (prioritize most impactful)
-- If query already specifies location, industry, AND title clearly, set needs_clarification: false
-- Include relevant options for each question based on query context
-- Be concise with questions
+- Maximum 5 questions (only ask what's truly necessary)
+- If the query is already specific enough, set needs_clarification: false
+- Provide helpful, relevant options for each question
+- Options should be contextual to the query, not generic
+- Include "Other" as last option when appropriate
 
 User Query: "{query}"
 """
