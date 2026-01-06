@@ -100,8 +100,12 @@ def build_apify_input(query: str, max_profiles: int = 100) -> Dict[str, Any]:
     """
     from parse_query import parse_query_with_llm
     
+    logger.info(f"🔍 [build_apify_input] Raw query received: {query}")
+    
     # Get structured filters from LLM
     filters = parse_query_with_llm(query)
+    
+    logger.info(f"📋 [build_apify_input] LLM parsed filters: {json.dumps(filters, indent=2)}")
     
     # Build X-Ray search query
     # Format: site:linkedin.com/in/ "title" "location" "industry"
@@ -110,33 +114,32 @@ def build_apify_input(query: str, max_profiles: int = 100) -> Dict[str, Any]:
     # Add titles (quoted for exact match)
     titles = filters.get("person_titles", [])[:2]
     if titles:
-        # Use first title as primary search term
         search_parts.append(f'"{titles[0]}"')
     
-    # Add location
+    # Add ALL locations (not just first one)
     locations = filters.get("organization_locations", [])
-    if locations:
-        search_parts.append(f'"{locations[0]}"')
+    for loc in locations[:2]:
+        search_parts.append(f'"{loc}"')
     
     # Add industry keywords
-    keywords = filters.get("q_organization_keyword_tags", [])[:1]
-    if keywords:
-        search_parts.append(f'"{keywords[0]}"')
+    keywords = filters.get("q_organization_keyword_tags", [])[:2]
+    for kw in keywords[:2]:
+        search_parts.append(f'"{kw}"')
     
     search_query = " ".join(search_parts)
-    logger.info(f"Built X-Ray query: {search_query}")
+    logger.info(f"🔎 [build_apify_input] Final X-Ray query: {search_query}")
     
     # Google Search Scraper input schema
     payload = {
         "queries": search_query,
-        "maxPagesPerQuery": 1,  # Just first page (10 results)
+        "maxPagesPerQuery": 1,
         "resultsPerPage": max_profiles,
         "mobileResults": False,
         "languageCode": "",
         "countryCode": "",
     }
     
-    logger.info(f"Built Apify input: {json.dumps(payload, indent=2)}")
+    logger.info(f"📦 [build_apify_input] Apify payload: {json.dumps(payload, indent=2)}")
     
     return payload
 

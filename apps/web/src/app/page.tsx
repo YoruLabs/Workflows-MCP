@@ -172,29 +172,22 @@ export default function Home() {
   // Build enriched query from answers
   const handleContinueWithAnswers = () => {
     const parts = [query];
-    const { answers } = clarification;
+    const { answers, questions } = clarification;
     
-    if (answers.location && answers.location !== "Other") {
-      parts.push(`in ${answers.location}`);
-    }
-    if (answers.industry) {
-      parts.push(`in ${answers.industry} industry`);
-    }
-    if (answers.company_size) {
-      parts.push(`at ${answers.company_size} companies`);
-    }
-    if (answers.seniority) {
-      parts.push(`${answers.seniority} level`);
-    }
-    
-    // Add any custom text answers
-    Object.entries(answers).forEach(([key, val]) => {
-      if (!["location", "industry", "company_size", "seniority"].includes(key) && val) {
-        parts.push(val);
+    // Add ALL answer values to the query
+    // Match each answer to its question for context
+    questions.forEach((q) => {
+      const answer = answers[q.id];
+      if (answer && answer !== "Other") {
+        parts.push(answer);
       }
     });
     
-    runSearch(parts.join(" "));
+    const enrichedQuery = parts.join(" ");
+    console.log("🔍 Enriched Query:", enrichedQuery);
+    console.log("📝 Answers:", answers);
+    
+    runSearch(enrichedQuery);
   };
 
   // Skip clarification and search with original query

@@ -44,23 +44,28 @@ logger = logging.getLogger(__name__)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 # System prompt for query parsing
-SYSTEM_PROMPT = """You are a query parser that converts natural language lead search queries into Apollo.io API filters.
+SYSTEM_PROMPT = """You are a query parser that converts natural language lead search queries into search filters.
 
-Given a natural language query, extract and return a JSON object with these Apollo API filter fields:
+Given a natural language query, extract and return a JSON object with these fields:
 
-- person_titles: list of job titles to search (be comprehensive, include variations)
+- person_titles: list of job titles to search (be comprehensive, include variations and translations)
 - person_seniorities: list from [owner, founder, c_suite, partner, vp, head, director, manager, senior, entry]
-- organization_locations: list of countries (use English names)
+- organization_locations: list of ALL location terms mentioned - include countries, regions, states, and cities exactly as mentioned
 - organization_num_employees_ranges: list of ranges like "1,10", "11,50", "51,200", "201,500", "501,1000", "1001,5000", "5001,10000"
 - q_organization_keyword_tags: list of industry keywords
+
+IMPORTANT for locations:
+- Include EVERY location term: countries, regions, states, cities
+- Preserve specific regions like "Nordeste", "Northeast", "São Paulo", "California" 
+- If user says "Nordeste do Brasil" include both "Nordeste" AND "Brazil"
+- Keep original language terms (e.g., "Nordeste" not "Northeast")
 
 Size mappings:
 - "startup" or "small" → ["1,10", "11,50"]
 - "mid-size" or "medium" → ["51,200", "201,500"]
 - "large" or "enterprise" → ["501,1000", "1001,5000", "5001,10000"]
 
-Be comprehensive with job titles - include common variations and synonyms.
-For locations, use the full country name in English.
+Be comprehensive with job titles - include common variations, synonyms, and translations.
 For industries, include related keywords and local terms if applicable.
 
 Return ONLY valid JSON, no explanation."""

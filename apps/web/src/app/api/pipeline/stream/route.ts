@@ -38,6 +38,10 @@ export async function POST(req: NextRequest) {
         // Send initial event
         sendEvent("progress", { step: "starting", message: "Starting pipeline..." });
 
+        // Log the incoming query for debugging
+        console.log("🔍 [Pipeline Stream] Query received:", query);
+        console.log("📊 [Pipeline Stream] Limit:", limit);
+
         // Build command args
         const args = [
           scriptPath,
