@@ -175,12 +175,24 @@ export default function Home() {
     const { answers, questions } = clarification;
     
     // Add ALL answer values to the query
-    // Match each answer to its question for context
     questions.forEach((q) => {
-      const answer = answers[q.id];
-      if (answer && answer !== "Other") {
-        parts.push(answer);
+      let answer = answers[q.id];
+      if (!answer) return;
+      
+      // Extract custom text from _custom: prefix
+      if (answer.startsWith("_custom:")) {
+        answer = answer.slice(8);
       }
+      
+      // Skip if answer is just Other/Outro/Otro (no custom text)
+      if (answer.toLowerCase() === "other" || 
+          answer.toLowerCase() === "outro" || 
+          answer.toLowerCase() === "otro" ||
+          !answer.trim()) {
+        return;
+      }
+      
+      parts.push(answer);
     });
     
     const enrichedQuery = parts.join(" ");
@@ -330,7 +342,8 @@ export default function Home() {
                           onClick={() => setAnswer(q.id, opt)}
                           className={cn(
                             "px-3 py-1.5 text-sm rounded-lg border transition-all",
-                            clarification.answers[q.id] === opt
+                            clarification.answers[q.id] === opt || 
+                            (opt.toLowerCase().includes("outro") || opt.toLowerCase().includes("other") || opt.toLowerCase() === "otro") && clarification.answers[q.id]?.startsWith("_custom:")
                               ? "bg-indigo-500 border-indigo-400 text-white"
                               : "bg-zinc-800/50 border-zinc-700 text-zinc-300 hover:border-zinc-500"
                           )}
@@ -339,6 +352,19 @@ export default function Home() {
                         </button>
                       ))}
                     </div>
+                    {/* Custom text input when Other is selected */}
+                    {(clarification.answers[q.id]?.toLowerCase().includes("outro") || 
+                      clarification.answers[q.id]?.toLowerCase().includes("other") ||
+                      clarification.answers[q.id]?.toLowerCase() === "otro" ||
+                      clarification.answers[q.id]?.startsWith("_custom:")) && (
+                      <input
+                        type="text"
+                        placeholder="Digite sua resposta personalizada... (opcional)"
+                        className="w-full mt-2 px-3 py-2 bg-zinc-800/50 border border-zinc-700 rounded-lg text-white text-sm placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                        value={clarification.answers[q.id]?.startsWith("_custom:") ? clarification.answers[q.id].slice(8) : ""}
+                        onChange={(e) => setAnswer(q.id, e.target.value ? `_custom:${e.target.value}` : "Outro")}
+                      />
+                    )}
                   </div>
                 ))}
               </div>
